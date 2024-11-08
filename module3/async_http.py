@@ -12,15 +12,19 @@ file_lock = asyncio.Lock()
 url_queue = asyncio.Queue()
 
 
-async def worker(session: aiohttp.ClientSession, file_path: str) -> dict:
-    url = await url_queue.get()
+async def request(session: aiohttp.ClientSession, url: str) -> dict:
     try:
         async with session.get(url, timeout=5) as response:
-            result = {"url": url, "status_code": response.status}
+            return {"url": url, "status_code": response.status}
     except aiohttp.ClientResponseError as e:
-        result = {"url": url, "status_code": e.status}
+        return {"url": url, "status_code": e.status}
     except (aiohttp.ClientError, asyncio.TimeoutError):
-        result = {"url": url, "status_code": 0}
+        return {"url": url, "status_code": 0}
+
+
+async def worker(session: aiohttp.ClientSession, file_path: str):
+    url = await url_queue.get()
+    result = await request(session, url)
     async with file_lock:
         with open(file_path, "a") as f:
             f.write(json.dumps(result) + "\n")
