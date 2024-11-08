@@ -8,8 +8,8 @@ urls = [
     "https://nonexistent.url",
 ]
 
-file_lock = asyncio.Lock()
 url_queue = asyncio.Queue()
+write_queue = asyncio.Queue()
 
 
 async def request(session: aiohttp.ClientSession, url: str) -> dict:
@@ -22,23 +22,32 @@ async def request(session: aiohttp.ClientSession, url: str) -> dict:
         return {"url": url, "status_code": 0}
 
 
-async def worker(session: aiohttp.ClientSession, file_path: str):
+async def worker(session: aiohttp.ClientSession):
     url = await url_queue.get()
     result = await request(session, url)
-    async with file_lock:
+    write_queue.put(result)
+    url_queue.task_done()
+
+
+async def writer(file_path: str):
+    while True:
+        result = await write_queue.get()
         with open(file_path, "a") as f:
             f.write(json.dumps(result) + "\n")
-    url_queue.task_done()
+        write_queue.task_done()
 
 
 async def fetch_urls(urls: list[str], file_path: str):
     async with aiohttp.ClientSession() as session:
-        tasks = [asyncio.create_task(worker(session, file_path)) for _ in range(5)]
+        tasks = [asyncio.create_task(worker(session)) for _ in range(5)]
+        write = asyncio.create_task(writer(file_path))
         for url in urls:
             await url_queue.put(url)
         await url_queue.join()
         for task in tasks:
             task.cancel()
+        await write_queue.join()
+        write.cancel()
 
 
 if __name__ == "__main__":
